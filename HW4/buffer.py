@@ -91,7 +91,13 @@ class Buffer:
         )
 
     def calc_reward_to_go(self, gamma=0.975):
-        pass
+        reward_to_go = 0
+        k = 0
+        for reward in self.rewards:
+            reward_to_go = reward_to_go + ((gamma)**(k))*reward
+
+        self.ret_to_go = reward_to_go
+        print(f"reward-to-go = {self.ret_to_go}")
 
 
 def collect_data(size, env, agent, title="collecting"):
@@ -160,6 +166,7 @@ def collect_data(size, env, agent, title="collecting"):
 
     env.close()
 
+    buffer.calc_reward_to_go()
     return buffer, np.mean(avg_reward_list)
 
 
