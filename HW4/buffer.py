@@ -60,10 +60,10 @@ class Buffer:
         self.ep_len = ep_len
 
     def add(self, state, action, reward, done):
-        print(f"received state: {state}")
-        print(f"received action: {action}")
-        print(f"received reward: {reward}")
-        print(f"received state: {state}")
+        # print(f"received state: {state}")
+        # print(f"received action: {action}")
+        # print(f"received reward: {reward}")
+        # print(f"received state: {state}")
 
         self.states[self.i] = state
         self.actions[self.i] = action
@@ -76,7 +76,10 @@ class Buffer:
 
     def sample(self, batch_size):
         upper = max(self.max_i - 1, 1)
-        idxs = np.random.randint(0, upper, size=batch_size)
+        print(f"upper: {upper}")
+        print(f"max_i: {self.max_i}")
+        print(f"ret_to_go len: {self.ret_to_go.size}")
+        idxs = np.random.randint(0, upper-1, size=batch_size)
         done_mask = self.dones[idxs, 0]
         idxs = np.where(done_mask, np.maximum(idxs - 1, 0), idxs)
         next_idxs = idxs + 1
@@ -91,12 +94,13 @@ class Buffer:
         )
 
     def calc_reward_to_go(self, gamma=0.975):
-        reward_to_go = 0
-        k = 0
-        for reward in self.rewards:
-            reward_to_go = reward_to_go + ((gamma)**(k))*reward
 
-        self.ret_to_go = reward_to_go
+        for i in range(0,len(self.states)):
+            for j in range(i,len(self.rewards)):
+                self.ret_to_go[i] += self.rewards[j]
+        
+            
+
         print(f"reward-to-go = {self.ret_to_go}")
 
 
@@ -137,32 +141,34 @@ def collect_data(size, env, agent, title="collecting"):
     # observation: what the agent can "see"
     # info: extra debugging information (usually not needed for basic learning)
 
-    print(f"Starting observation: {observation}")
+    # print(f"Starting observation: {observation}")
 
     episode_over = False
     total_reward = 0
 
     while not episode_over:
 
-        print(f"State: {observation}")
+        # print(f"State: {observation}")
         action = act(agent,observation) #get torque from policy network
         observation,reward,terminated,truncated,info = env.step(action)
         buffer.add(observation,action,reward,1)
 
         # debugging statements
-        print(f"Action: {action}")
-        print(f"Reward: {reward}")
-        print(f"Next State: {observation}")
+        #------------------------------
+
+        # print(f"Action: {action}")
+        # print(f"Reward: {reward}")
+        # print(f"Next State: {observation}")
         avg_reward_list.append(reward)
         total_reward+=reward
         episode_over = terminated or truncated
     print(f"Episode finished! Total reward: {total_reward}")
 
     # debugging statements
-    print(f"buffer states: {buffer.states}")
-    print(f"buffer actions: {buffer.actions}")
-    print(f"buffer rewards: {buffer.rewards}")
-    print(f"buffer dones: {buffer.dones}")
+    # print(f"buffer states: {buffer.states}")
+    # print(f"buffer actions: {buffer.actions}")
+    # print(f"buffer rewards: {buffer.rewards}")
+    # print(f"buffer dones: {buffer.dones}")
 
     env.close()
 
@@ -180,13 +186,20 @@ def act(policy, state):
 
 def rescale_actions(action, amin, amax):
     """Rescale a tanh-squashed action from (-1, 1) to the env range [amin, amax]."""
+    # print(f"Action: {action}")
     torque_scaled = (action - amin)/(amax - amin)
     return torque_scaled
 
 
-env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
-agent = PolicyNet()
-size = 100
+# env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
+# agent = PolicyNet()
+# size = 100
 
-buffer_replay, mean_reward = collect_data(size,env,agent)
-print(f"Average Reward Per Step: {mean_reward}")
+# buffer_replay, mean_reward = collect_data(size,env,agent)
+# print(f"Average Reward Per Step: {mean_reward}")
+
+# print(buffer_replay.ret_to_go)
+# print(len(buffer_replay.ret_to_go)
+    #   )
+
+# samples = buffer_replay.sample(1)

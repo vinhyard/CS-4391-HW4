@@ -5,7 +5,7 @@ Depends on: buffer.py (Task 1) and vpg.py (Task 2).
 """
 
 import numpy as np
-import torch as th
+import torch
 import torch.nn as nn
 from torch.nn.functional import mse_loss
 from torch.distributions import Normal
@@ -13,6 +13,39 @@ import gymnasium as gym
 
 from buffer import Buffer, collect_data, act, rescale_actions
 from vpg import _log_prob, build_actor
+
+
+# ========= POLICY NETWORK ==============
+from Modules import NormalModule
+
+class PolicyNet(nn.Module):
+  def __init__(self):
+    super().__init__()
+    # self.flatten = nn.Flatten(start_dim=-1)
+    self.policy_network = nn.Sequential(
+        nn.Linear(3,100), # input is state [x,y,angle]
+        nn.ReLU(),
+        nn.Linear(100,100),
+        nn.ReLU(),
+        nn.Linear(100,10), 
+        NormalModule(10,1) # output is action [mu,sigma] for Gaussian
+    )
+  def forward(self, x):
+    mu, sigma = self.policy_network(x)
+    # print(f"mu: {mu}, sigma: {sigma}")
+    # ask about using NormalModule()....
+    
+    gaussian = Normal(mu,sigma)
+    # print(f"gaussian: {gaussian}")
+    torque = gaussian.sample()
+
+    return torque
+
+policy_network = PolicyNet()
+#==========================================
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +109,7 @@ def train_advantage_vpg(
     critic_lr=3e-4,
     hidden_size=32,
     layers=2,
-    batch_size=512,
+    batch_size=10,
     gamma=0.975,
     lam=0.95,
 ):
@@ -91,16 +124,18 @@ def train_advantage_vpg(
     action_dim  = env.action_space.sample().shape[0]
     episode_len = env.spec.max_episode_steps
 
-    policy       = build_actor(state_dim, action_dim, hidden_size)
+    # policy       = build_actor(state_dim, action_dim, hidden_size)
+    policy       = policy_network
     critic       = build_critic(state_dim, hidden_size)
-    optimizer    = th.optim.Adam(params=policy.parameters(), lr=learning_rate)
-    cr_optimizer = th.optim.Adam(params=critic.parameters(), lr=critic_lr)
+    optimizer    = torch.optim.Adam(params=policy.parameters(), lr=learning_rate)
+    cr_optimizer = torch.optim.Adam(params=critic.parameters(), lr=critic_lr)
 
     returns_per_epoch = []
+
     for x in range(epochs):
 
         # --- collect experience ---
-        with th.no_grad():
+        with torch.no_grad():
             buffer, avg_rwd = collect_data(
                 episodes * episode_len, env, policy, title=f"gae {x + 1}/{epochs}"
             )
@@ -112,8 +147,8 @@ def train_advantage_vpg(
         # Regress V(s) toward the reward-to-go targets for critic_updates steps.
         for _ in range(critic_updates):
             states, actions, rewards, states, dones, rtg, _ = buffer.sample(batch_size)
-            states_t = th.as_tensor(states, dtype=th.float32)
-            rtg_t    = th.as_tensor(rtg,    dtype=th.float32)
+            states_t = torch.as_tensor(states, dtype=torch.float32)
+            rtg_t    = torch.as_tensor(rtg,    dtype=torch.float32)
             cr_optimizer.zero_grad()
             # TODO: compute mse_loss between critic(states_t) and rtg_t,
             #       then call .backward() and cr_optimizer.step().
@@ -122,8 +157,8 @@ def train_advantage_vpg(
 
         # --- compute GAE advantages ---
         # Run the critic (no gradients) on every stored state.
-        all_states = th.as_tensor(buffer.states[: buffer.max_i], dtype=th.float32)
-        with th.no_grad():
+        all_states = torch.as_tensor(buffer.states[: buffer.max_i], dtype=torch.float32)
+        with torch.no_grad():
             values = critic(all_states).numpy()          # V(s_t)
         next_values = np.zeros_like(values)
         next_values[:-1] = values[1:]                    # V(s_{t+1}), 0 at episode end
@@ -137,9 +172,9 @@ def train_advantage_vpg(
         # --- train the actor ---
         for _ in range(updates):
             idxs      = np.random.randint(0, buffer.max_i, size=batch_size)
-            states_t  = th.as_tensor(buffer.states[idxs],  dtype=th.float32)
-            actions_t = th.as_tensor(buffer.actions[idxs], dtype=th.float32)
-            adv_t     = th.as_tensor(advantages[idxs],     dtype=th.float32)
+            states_t  = torch.as_tensor(buffer.states[idxs],  dtype=torch.float32)
+            actions_t = torch.as_tensor(buffer.actions[idxs], dtype=torch.float32)
+            adv_t     = torch.as_tensor(advantages[idxs],     dtype=torch.float32)
             optimizer.zero_grad()
             # TODO: call reinforce_adv_signal(...) to get the loss,
             #       then call .backward() and optimizer.step().
@@ -157,10 +192,14 @@ if __name__ == "__main__":
     from vpg import train_vpg
 
     # Example: compare rewards-to-go vs GAE
-    policy_rtg, ret_rtg = train_vpg(epochs=200, learning_rate=3e-4)
+    # policy_rtg, ret_rtg = train_vpg(epochs=200, learning_rate=3e-4)
     policy_gae, ret_gae = train_advantage_vpg(epochs=200, learning_rate=3e-4)
+    #plot_learning_curves(
+    #    {"rewards-to-go": ret_rtg, "GAE": ret_gae},
+    #    title="Task 3: rewards-to-go vs GAE",
+    #)
     plot_learning_curves(
-        {"rewards-to-go": ret_rtg, "GAE": ret_gae},
+        {"GAE": ret_gae},
         title="Task 3: rewards-to-go vs GAE",
     )
     record_video(policy_gae, path="videos/task3_gae.mp4")  # optional
