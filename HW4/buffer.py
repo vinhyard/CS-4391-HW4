@@ -152,7 +152,7 @@ def act(policy, state):
 
 def rescale_actions(action, amin, amax):
     """Rescale a tanh-squashed action from (-1, 1) to the env range [amin, amax]."""
-    torque_scaled = action * amax
+    torque_scaled = (action - amin)/(amax - amin)
     return torque_scaled
 
 
