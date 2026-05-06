@@ -3,7 +3,6 @@ HW4 — Task 1: Replay buffer and environment interaction.
 
 Complete the four TODO items below before moving on to vpg.py.
 """
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -26,15 +25,8 @@ class PolicyNet(nn.Module):
         NormalModule(10,1) # output is action [mu,sigma] for Gaussian
     )
   def forward(self, x):
-    mu, sigma = self.policy_network(x)
-    # print(f"mu: {mu}, sigma: {sigma}")
-    # ask about using NormalModule()....
-    
-    gaussian = Normal(mu,sigma)
-    # print(f"gaussian: {gaussian}")
-    torque = gaussian.sample()
-
-    return torque
+      mu, sigma = self.policy_network(x)
+      return mu, sigma
 
 policy_network = PolicyNet()
 #==========================================
@@ -60,10 +52,7 @@ class Buffer:
         self.ep_len = ep_len
 
     def add(self, state, action, reward, done):
-        # print(f"received state: {state}")
-        # print(f"received action: {action}")
-        # print(f"received reward: {reward}")
-        # print(f"received state: {state}")
+
 
         self.states[self.i] = state
         self.actions[self.i] = action
@@ -76,10 +65,7 @@ class Buffer:
 
     def sample(self, batch_size):
         upper = max(self.max_i - 1, 1)
-        print(f"upper: {upper}")
-        print(f"max_i: {self.max_i}")
-        print(f"ret_to_go len: {self.ret_to_go.size}")
-        idxs = np.random.randint(0, upper-1, size=batch_size)
+        idxs = np.random.randint(0, upper, size=batch_size)
         done_mask = self.dones[idxs, 0]
         idxs = np.where(done_mask, np.maximum(idxs - 1, 0), idxs)
         next_idxs = idxs + 1
@@ -94,14 +80,13 @@ class Buffer:
         )
 
     def calc_reward_to_go(self, gamma=0.975):
-
-        for i in range(0,len(self.states)):
-            for j in range(i,len(self.rewards)):
-                self.ret_to_go[i] += self.rewards[j]
-        
-            
-
-        print(f"reward-to-go = {self.ret_to_go}")
+        reward_to_go = 0.0
+        k = 0
+        for k in reversed(range(self.max_i)):
+            if self.dones[k, 0]:
+                reward_to_go = 0.0
+            reward_to_go = self.rewards[k, 0] + gamma * reward_to_go
+            self.ret_to_go[k, 0] = reward_to_go
 
 
 def collect_data(size, env, agent, title="collecting"):
@@ -139,67 +124,41 @@ def collect_data(size, env, agent, title="collecting"):
     observation, info = env.reset()
 
     # observation: what the agent can "see"
-    # info: extra debugging information (usually not needed for basic learning)
 
-    # print(f"Starting observation: {observation}")
-
-    episode_over = False
-    total_reward = 0
-
-    while not episode_over:
-
-        # print(f"State: {observation}")
-        action = act(agent,observation) #get torque from policy network
-        observation,reward,terminated,truncated,info = env.step(action)
-        buffer.add(observation,action,reward,1)
-
-        # debugging statements
-        #------------------------------
-
-        # print(f"Action: {action}")
-        # print(f"Reward: {reward}")
-        # print(f"Next State: {observation}")
+    for i in range(size):
+        action = act(agent, observation)
+        next_observation, reward, term, trunc, e = env.step(action)
+        done = term or trunc
+        buffer.add(observation, action, reward, done)
         avg_reward_list.append(reward)
-        total_reward+=reward
-        episode_over = terminated or truncated
-    print(f"Episode finished! Total reward: {total_reward}")
+        if not done:
+            observation = next_observation
+        else:
+            observation, info = env.reset()
 
-    # debugging statements
-    # print(f"buffer states: {buffer.states}")
-    # print(f"buffer actions: {buffer.actions}")
-    # print(f"buffer rewards: {buffer.rewards}")
-    # print(f"buffer dones: {buffer.dones}")
 
-    env.close()
 
     buffer.calc_reward_to_go()
-    return (buffer, np.mean(avg_reward_list))
+    return buffer, np.mean(avg_reward_list)
 
 
 def act(policy, state):
     """Sample a continuous action a ~ N(mu(state), sigma) from the policy."""
-    x_np = torch.from_numpy(state)
-    torque = policy(x_np)
-    torque = rescale_actions(torque,-2,2)
-    return torque
+    x = torch.as_tensor(state, dtype=torch.float32)
+    mu, sigma = policy(x)
+    action = Normal(mu, sigma).sample()
+    return rescale_actions(action, -2, 2).numpy()
 
 
 def rescale_actions(action, amin, amax):
     """Rescale a tanh-squashed action from (-1, 1) to the env range [amin, amax]."""
-    # print(f"Action: {action}")
-    torque_scaled = (action - amin)/(amax - amin)
+    torque_scaled = action * amax
     return torque_scaled
 
 
-# env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
-# agent = PolicyNet()
-# size = 100
-
-# buffer_replay, mean_reward = collect_data(size,env,agent)
-# print(f"Average Reward Per Step: {mean_reward}")
-
-# print(buffer_replay.ret_to_go)
-# print(len(buffer_replay.ret_to_go)
-    #   )
-
-# samples = buffer_replay.sample(1)
+if __name__ == "__main__":
+    from vpg import train_vpg
+    env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
+    agent = PolicyNet()
+    buffer_replay, mean_reward = collect_data(100, env, agent)
+    print(f"Average Reward Per Step: {mean_reward}")
