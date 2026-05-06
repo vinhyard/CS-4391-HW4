@@ -44,15 +44,27 @@ def compute_gae(rewards, values, next_values, dones, gamma=0.975, lam=0.95):
     """Generalized Advantage Estimation (PPO paper, Equations 11-12). https://arxiv.org/pdf/1707.06347
 
         delta_t = r_t + gamma * V(s_{t+1}) * (1 - done_t) - V(s_t)
+
+        Implementation:
+        delta_t = rewards + gamma * next_values * (1 - done_t) - values
+
         A_t     = delta_t + gamma * lam * (1 - done_t) * A_{t+1}
+
+        Implementation: 
+        Isn't A = gamma * (next_values) - values
+        A_t = delta_t + gamma * lam * (1 - done_t) * A_{t+1}
     """
-    pass
+
+    delta_t = rewards + gamma * next_values * (1-dones) - values
+    gae = delta_t + gamma * lam * (1-dones) * (gamma * next_values - values)
+    #                                                gamma * V(s') - V(s)
+    return gae
 
 
 def reinforce_adv_signal(policy, states, actions, advantages):
     """Policy-gradient loss weighted by arbitrary advantages (e.g. GAE)."""
     # TODO: compute  -E[ A_t * log pi(a | s) ].
-    pass
+    return advantages * _log_prob(policy=policy,states=states,actions=actions)
 
 
 def train_advantage_vpg(
@@ -94,16 +106,19 @@ def train_advantage_vpg(
             )
 
         # TODO: fill buffer.ret_to_go using buffer.calc_reward_to_go(gamma).
+        buffer.calc_reward_to_go(gamma=gamma)
 
         # --- train the critic ---
         # Regress V(s) toward the reward-to-go targets for critic_updates steps.
         for _ in range(critic_updates):
-            states, _, _, _, _, rtg, _ = buffer.sample(batch_size)
+            states, actions, rewards, states, dones, rtg, _ = buffer.sample(batch_size)
             states_t = th.as_tensor(states, dtype=th.float32)
             rtg_t    = th.as_tensor(rtg,    dtype=th.float32)
             cr_optimizer.zero_grad()
             # TODO: compute mse_loss between critic(states_t) and rtg_t,
             #       then call .backward() and cr_optimizer.step().
+            mse = mse_loss(critic(states_t) - rtg).backward()
+            cr_optimizer.step()
 
         # --- compute GAE advantages ---
         # Run the critic (no gradients) on every stored state.
@@ -114,7 +129,7 @@ def train_advantage_vpg(
         next_values[:-1] = values[1:]                    # V(s_{t+1}), 0 at episode end
 
         # TODO: call compute_gae(...) to get an (N, 1) array of advantages.
-        advantages = None  # TODO
+        advantages = compute_gae(rewards=rewards,values = values, next_values = next_values, dones = dones)  # TODO
 
         # Normalise for training stability (provided).
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)

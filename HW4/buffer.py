@@ -167,7 +167,7 @@ def collect_data(size, env, agent, title="collecting"):
     env.close()
 
     buffer.calc_reward_to_go()
-    return buffer, np.mean(avg_reward_list)
+    return (buffer, np.mean(avg_reward_list))
 
 
 def act(policy, state):
