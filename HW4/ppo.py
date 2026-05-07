@@ -47,7 +47,16 @@ def ppo_surrogate_loss(
     Returns the *negative* of the objective so that optimizer.step()
     performs gradient ascent on the expected return.
     """
-    pass
+    log_pi = _log_prob(policy, states, actions)
+    probability_ratio = th.exp(log_pi - old_log_probs)
+    surrogate = probability_ratio * advantages
+    if clip == True:
+        clipped_surrogate = th.clamp(probability_ratio, 1.0 - eps_clip, 1.0 + eps_clip) * advantages
+        loss = -th.min(surrogate, clipped_surrogate).mean()
+    else:
+        loss = -surrogate.mean()
+    return loss
+
 
 
 def ppo_total_loss(
@@ -70,7 +79,13 @@ def ppo_total_loss(
     where L_VF = ( V_theta(s) - R_t )^2  and  S[pi] is the policy entropy.
     Returns a scalar tensor to be minimised.
     """
-    pass
+    surrogate = ppo_surrogate_loss(policy, states, actions, advantages, old_log_probs,
+                                   eps_clip=eps_clip, clip=clip)
+    vals = critic(states)
+    val_loss = mse_loss(vals, returns)
+    mu, sigma = policy(states)
+    s_pi = Normal(mu, sigma).entropy().sum(dim = 1).mean()
+    return surrogate + c1 * val_loss - c2 * s_pi
 
 
 # ---------------------------------------------------------------------------
