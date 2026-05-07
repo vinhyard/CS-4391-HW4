@@ -78,12 +78,12 @@ def compute_gae(rewards, values, next_values, dones, gamma=0.975, lam=0.95):
 
         delta_t = r_t + gamma * V(s_{t+1}) * (1 - done_t) - V(s_t)
 
-        Implementation:
+        My Implementation:
         delta_t = rewards + gamma * next_values * (1 - done_t) - values
 
         A_t     = delta_t + gamma * lam * (1 - done_t) * A_{t+1}
 
-        Implementation: 
+        My Implementation: 
         Isn't A approximated as  = E{r + gamma * (next_values) - values}
         A_t = delta_t + gamma * lam * (1 - done_t) * A_{t+1}
     """
