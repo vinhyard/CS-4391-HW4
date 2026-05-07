@@ -15,34 +15,34 @@ from buffer import Buffer, collect_data, act, rescale_actions
 from vpg import _log_prob, build_actor
 
 
-# ========= POLICY NETWORK ==============
-from Modules import NormalModule
+# # ========= POLICY NETWORK ==============
+# from Modules import NormalModule
 
-class PolicyNet(nn.Module):
-  def __init__(self):
-    super().__init__()
-    # self.flatten = nn.Flatten(start_dim=-1)
-    self.policy_network = nn.Sequential(
-        nn.Linear(3,100), # input is state [x,y,angle]
-        nn.ReLU(),
-        nn.Linear(100,100),
-        nn.ReLU(),
-        nn.Linear(100,10), 
-        NormalModule(10,1) # output is action [mu,sigma] for Gaussian
-    )
-  def forward(self, x):
-    mu, sigma = self.policy_network(x)
-    # print(f"mu: {mu}, sigma: {sigma}")
-    # ask about using NormalModule()....
+# class PolicyNet(nn.Module):
+#   def __init__(self):
+#     super().__init__()
+#     # self.flatten = nn.Flatten(start_dim=-1)
+#     self.policy_network = nn.Sequential(
+#         nn.Linear(3,100), # input is state [x,y,angle]
+#         nn.ReLU(),
+#         nn.Linear(100,100),
+#         nn.ReLU(),
+#         nn.Linear(100,10), 
+#         NormalModule(10,1) # output is action [mu,sigma] for Gaussian
+#     )
+#   def forward(self, x):
+#     mu, sigma = self.policy_network(x)
+#     # print(f"mu: {mu}, sigma: {sigma}")
+#     # ask about using NormalModule()....
     
-    gaussian = Normal(mu,sigma)
-    # print(f"gaussian: {gaussian}")
-    torque = gaussian.sample()
+#     gaussian = Normal(mu,sigma)
+#     # print(f"gaussian: {gaussian}")
+#     torque = gaussian.sample()
 
-    return torque
+#     return torque
 
-policy_network = PolicyNet()
-#==========================================
+# policy_network = PolicyNet()
+# #==========================================
 
 
 
@@ -84,20 +84,25 @@ def compute_gae(rewards, values, next_values, dones, gamma=0.975, lam=0.95):
         A_t     = delta_t + gamma * lam * (1 - done_t) * A_{t+1}
 
         Implementation: 
-        Isn't A = gamma * (next_values) - values
+        Isn't A approximated as  = E{r + gamma * (next_values) - values}
         A_t = delta_t + gamma * lam * (1 - done_t) * A_{t+1}
     """
-
+    # print(dones)
+    # print(type(dones))
+    # print(dones.shape)
     delta_t = rewards + gamma * next_values * (1-dones) - values
-    gae = delta_t + gamma * lam * (1-dones) * (gamma * next_values - values)
-    #                                                gamma * V(s') - V(s)
-    return gae
+    advantages = delta_t + gamma * lam * (1-dones) * (rewards + gamma*(next_values)-values)
+    #                                                   r     + gamma (V'(s'))  - V(s) 
+    return advantages
 
 
 def reinforce_adv_signal(policy, states, actions, advantages):
     """Policy-gradient loss weighted by arbitrary advantages (e.g. GAE)."""
     # TODO: compute  -E[ A_t * log pi(a | s) ].
-    return advantages * _log_prob(policy=policy,states=states,actions=actions)
+    loss = advantages * _log_prob(policy=policy,states=states,actions=actions)
+    # print(loss.shape)
+    # print(loss)
+    return loss.mean()
 
 
 def train_advantage_vpg(
@@ -124,8 +129,7 @@ def train_advantage_vpg(
     action_dim  = env.action_space.sample().shape[0]
     episode_len = env.spec.max_episode_steps
 
-    # policy       = build_actor(state_dim, action_dim, hidden_size)
-    policy       = policy_network
+    policy       = build_actor(state_dim, action_dim, hidden_size)
     critic       = build_critic(state_dim, hidden_size)
     optimizer    = torch.optim.Adam(params=policy.parameters(), lr=learning_rate)
     cr_optimizer = torch.optim.Adam(params=critic.parameters(), lr=critic_lr)
@@ -133,7 +137,7 @@ def train_advantage_vpg(
     returns_per_epoch = []
 
     for x in range(epochs):
-
+        print(f"{x}/{epochs} epochs")
         # --- collect experience ---
         with torch.no_grad():
             buffer, avg_rwd = collect_data(
@@ -152,7 +156,7 @@ def train_advantage_vpg(
             cr_optimizer.zero_grad()
             # TODO: compute mse_loss between critic(states_t) and rtg_t,
             #       then call .backward() and cr_optimizer.step().
-            mse = mse_loss(critic(states_t) - rtg).backward()
+            mse = mse_loss(critic(states_t),rtg_t).backward()
             cr_optimizer.step()
 
         # --- compute GAE advantages ---
@@ -164,20 +168,43 @@ def train_advantage_vpg(
         next_values[:-1] = values[1:]                    # V(s_{t+1}), 0 at episode end
 
         # TODO: call compute_gae(...) to get an (N, 1) array of advantages.
-        advantages = compute_gae(rewards=rewards,values = values, next_values = next_values, dones = dones)  # TODO
+        # print("------dones")
+        # print(dones)
+        # print(len(dones))
 
+        # print("--------rewards")
+        # print(rewards)
+        # print(len(rewards))
+        # print("------buffer rewards")
+        # print(buffer.rewards)
+        # print(len(buffer.rewards))
+
+        # print("--------values")
+        # print(values)
+        # print(len(values))      
+
+        advantages = compute_gae(rewards=buffer.rewards,values = values, next_values = next_values, dones = buffer.dones)  # TODO
+        # print(f"-------advantages: {advantages}")
+        advantages = np.array(advantages)
         # Normalise for training stability (provided).
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
+        # print("In training:---")
         # --- train the actor ---
         for _ in range(updates):
             idxs      = np.random.randint(0, buffer.max_i, size=batch_size)
+            # print(batch_size)
+
             states_t  = torch.as_tensor(buffer.states[idxs],  dtype=torch.float32)
             actions_t = torch.as_tensor(buffer.actions[idxs], dtype=torch.float32)
             adv_t     = torch.as_tensor(advantages[idxs],     dtype=torch.float32)
             optimizer.zero_grad()
             # TODO: call reinforce_adv_signal(...) to get the loss,
             #       then call .backward() and optimizer.step().
+            loss = reinforce_adv_signal(policy, states_t, actions_t, adv_t)
+            loss.backward()
+            optimizer.step()
+
 
         ep_return = avg_rwd * episode_len
         returns_per_epoch.append(ep_return)
@@ -192,14 +219,14 @@ if __name__ == "__main__":
     from vpg import train_vpg
 
     # Example: compare rewards-to-go vs GAE
-    # policy_rtg, ret_rtg = train_vpg(epochs=200, learning_rate=3e-4)
+    policy_rtg, ret_rtg = train_vpg(epochs=200, learning_rate=3e-4)
     policy_gae, ret_gae = train_advantage_vpg(epochs=200, learning_rate=3e-4)
-    #plot_learning_curves(
-    #    {"rewards-to-go": ret_rtg, "GAE": ret_gae},
-    #    title="Task 3: rewards-to-go vs GAE",
-    #)
     plot_learning_curves(
-        {"GAE": ret_gae},
-        title="Task 3: rewards-to-go vs GAE",
+       {"rewards-to-go": ret_rtg, "GAE": ret_gae},
+       title="Task 3: rewards-to-go vs GAE",
     )
-    record_video(policy_gae, path="videos/task3_gae.mp4")  # optional
+    # plot_learning_curves(
+        # {"GAE": ret_gae},
+        # title="Task 3: rewards-to-go vs GAE",
+    # )
+    # record_video(policy_gae, path="videos/task3_gae.mp4")  # optional

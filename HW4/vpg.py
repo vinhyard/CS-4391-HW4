@@ -48,13 +48,19 @@ def build_actor(state_dim, action_dim, hidden_size):
 def reinforce_signal(policy, states, actions, rewards_to_go, avg_rwd, use_avg=False):
     """Vanilla policy-gradient loss weighted by reward-to-go."""
     # TODO: compute  -E[ (R_to_go - baseline?) * log pi(a | s) ]
-    pass
+    log_pi = _log_prob(policy, states, actions)
+    baseline = 0.0
+    if use_avg == True:
+        baseline = avg_rwd
+    return -((rewards_to_go - baseline) * log_pi).mean()
 
 
 def reinforce_rwd_signal(policy, states, actions, rewards):
     """REINFORCE loss using one-step rewards instead of reward-to-go."""
     # TODO: compute  -E[ r_t * log pi(a | s) ].
-    pass
+    log_pi = _log_prob(policy, states, actions)
+    
+    return -(rewards * log_pi).mean()
 
 
 def train_vpg(
@@ -88,23 +94,35 @@ def train_vpg(
         # TODO: 1) roll out to fill a buffer (use collect_data under th.no_grad)
         #       2) buffer.calc_reward_to_go()
         with th.no_grad():
-            buffer, avg_rwd = None, None  # TODO
+            buffer, avg_rwd = collect_data(size = episodes * episode_len, env = env, agent=policy)
 
         for i in range(updates):
             # TODO: You need to sample from the buffer here
             # TODO: After sampling you need to convert numpy arrays to tensors, Example: "s_t = th.as_tensor(s, dtype=th.float32)"
-            
+            state, action, reward, next_state, d, reward_to_go, next_reward_to_go = buffer.sample(batch_size)
+            s_t = th.as_tensor(state, dtype=th.float32)
+            a_t = th.as_tensor(action, dtype=th.float32)
+            reward_to_go_t = th.as_tensor(reward_to_go, dtype=th.float32)
             optimizer.zero_grad()
 
             # TODO: compute loss here
             loss = 0.0
+            if use_rwds:
+                reward_t = th.as_tensor(reward, dtype=th.float32)
+                loss = reinforce_rwd_signal(policy, s_t, a_t, reward_t)
+            else:
+                loss = reinforce_signal(policy, s_t, a_t, reward_to_go_t, avg_rwd, use_avg)
+
 
             loss.backward()
             optimizer.step()
-
+        
+        returns_per_epoch.append(avg_rwd * episode_len)
+        print(f"{x}/{epochs} epochs")
         # TODO: record the epoch's avg episodic return for the learning curve.
 
     # TODO: return (policy, list_of_per_epoch_returns).
+    return policy, returns_per_epoch
 
 
 if __name__ == "__main__":
@@ -115,7 +133,8 @@ if __name__ == "__main__":
     policy_lo, ret_lo = train_vpg(epochs=200, learning_rate=1e-4)
     policy_hi, ret_hi = train_vpg(epochs=200, learning_rate=3e-4)
     plot_learning_curves(
-        {"lr=1e-4": ret_lo, "lr=3e-4": ret_hi},
-        title="Task 2: VPG with different learning rates",
+         {"lr=1e-4": ret_lo, "lr=3e-4": ret_hi},
+         title="Task 2: VPG with different learning rates",
     )
+    print("Analysis: The orange curve shows larger swings than the blue curve. Neither curve has a clear trend with 200 epochs. The different step sizes indicate that 3e-4 is less stable compared to 1e-4.")
     record_video(policy_hi, path="videos/task2_vpg.mp4")  # optional
