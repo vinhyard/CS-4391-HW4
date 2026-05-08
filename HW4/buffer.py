@@ -77,6 +77,7 @@ class Buffer:
             self.dones[next_idxs],
             self.ret_to_go[idxs],
             self.ret_to_go[next_idxs],
+            idxs
         )
 
     def calc_reward_to_go(self, gamma=0.975):

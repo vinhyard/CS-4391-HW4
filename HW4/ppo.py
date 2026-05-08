@@ -143,7 +143,7 @@ def train_ppo(
 
     returns_per_iter = []
     losses_per_iter  = []
-
+    
     for k in range(iterations):
         # TODO: 1) roll out the current policy for `steps_per_iter` steps
         #          and store transitions in a Buffer.
@@ -184,7 +184,7 @@ def train_ppo(
         # --- train the critic ---
         #Regress V(s) toward the reward-to-go targets for critic_updates steps.
         for _ in range(steps_per_iter):
-            states_c, actions_c, rewards_c, next_states_c, dones_c, rtg, _ = buffer.sample(steps_per_iter)
+            states_c, actions_c, rewards_c, next_states_c, dones_c, rtg, _, _ = buffer.sample(steps_per_iter)
             states_c_t = th.as_tensor(states_c, dtype=th.float32)
             rtg_t    = th.as_tensor(rtg,    dtype=th.float32)
         cr_optimizer.zero_grad()
@@ -209,20 +209,23 @@ def train_ppo(
         #       3) cache the log-probabilities of the sampled actions under
         #          the *old* policy (detach from the graph).
         #====================================================================
-        old_policy = _log_prob(policy=policy,actions=a_t,states=s_t)
+
+        old_policy = _log_prob(policy=policy,actions=a_t,states=s_t).detach()
 
 
         #====================================================================
         #       4) for `sgd_epochs` epochs, iterate over minibatches of the
         #          collected data and minimise ppo_total_loss(...).
         #====================================================================
+
+        prev_loss = 0.0
         for x in range(sgd_epochs):
 
             # --- train the critic ---
             # Regress V(s) toward the reward-to-go targets for critic_updates steps.
 
             for _ in range(minibatch_size):
-                mini_states, mini_actions, mini_rewards, mini_states, mini_dones, mini_rtg, _ = buffer.sample(minibatch_size)
+                mini_states, mini_actions, mini_rewards, mini_states, mini_dones, mini_rtg, _, mini_idx = buffer.sample(minibatch_size)
                 mini_states_t = th.as_tensor(mini_states, dtype=th.float32)
                 mini_actions_t = th.as_tensor(mini_actions, dtype=th.float32)
                 mini_rtg_t    = th.as_tensor(mini_rtg,    dtype=th.float32)
@@ -249,13 +252,23 @@ def train_ppo(
             print(mini_returns.shape)
 
 
-            optimizer.zero_grad()  
-            print("here-------")         
-            mini_ppo_total_loss = ppo_total_loss(policy,critic,mini_states_t,mini_actions_t,mini_advantages,mini_returns, old_policy).backward()            
+            mini_adv_t = th.as_tensor(mini_advantages, dtype=th.float32).squeeze(-1)
+            mini_ret_t = th.as_tensor(mini_returns,    dtype=th.float32)
+            mini_old   = old_policy[mini_idx]
+
+            optimizer.zero_grad()
+            mini_ppo_total_loss = ppo_total_loss(
+                policy, critic,
+                mini_states_t, mini_actions_t,
+                mini_adv_t, mini_ret_t, mini_old,
+                eps_clip=eps_clip, c1=c1, c2=c2, clip=clip,)
+            mini_ppo_total_loss.backward()
+            optimizer.step()
+            prev_loss = mini_ppo_total_loss.item()          
             optimizer.step()
         returns_per_iter.append(np.mean(returns))
-        losses_per_iter.append(mse)
-        print(f"{x}/{iterations} iterations")
+        losses_per_iter.append(prev_loss)
+        print(f"{k+1}/{iterations} iterations  loss={prev_loss:.4f}")
 
 
         #=================
@@ -265,6 +278,7 @@ def train_ppo(
         #===============
 
     # TODO: return policy, list_of_returns, list_of_losses
+    return policy, returns_per_iter, losses_per_iter
 
 
 if __name__ == "__main__":

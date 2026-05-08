@@ -99,7 +99,7 @@ def train_vpg(
         for i in range(updates):
             # TODO: You need to sample from the buffer here
             # TODO: After sampling you need to convert numpy arrays to tensors, Example: "s_t = th.as_tensor(s, dtype=th.float32)"
-            state, action, reward, next_state, d, reward_to_go, next_reward_to_go = buffer.sample(batch_size)
+            state, action, reward, next_state, d, reward_to_go, next_reward_to_go, _ = buffer.sample(batch_size)
             s_t = th.as_tensor(state, dtype=th.float32)
             a_t = th.as_tensor(action, dtype=th.float32)
             reward_to_go_t = th.as_tensor(reward_to_go, dtype=th.float32)

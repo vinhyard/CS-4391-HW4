@@ -146,7 +146,7 @@ def train_advantage_vpg(
         # --- train the critic ---
         # Regress V(s) toward the reward-to-go targets for critic_updates steps.
         for _ in range(critic_updates):
-            states, actions, rewards, states, dones, rtg, _ = buffer.sample(batch_size)
+            states, actions, rewards, states, dones, rtg, _, _ = buffer.sample(batch_size)
             states_t = torch.as_tensor(states, dtype=torch.float32)
             rtg_t    = torch.as_tensor(rtg,    dtype=torch.float32)
             cr_optimizer.zero_grad()
