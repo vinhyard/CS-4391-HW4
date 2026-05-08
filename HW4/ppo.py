@@ -175,7 +175,6 @@ def train_ppo(
         a_t = th.as_tensor(buffer.actions, dtype=th.float32)
 
 
-
         #====================================================================
         #       2) compute V(s) and V(s') with the critic, then GAE advantages
         #          and target returns (returns = advantages + V(s)).
@@ -183,12 +182,14 @@ def train_ppo(
 
         # --- train the critic ---
         #Regress V(s) toward the reward-to-go targets for critic_updates steps.
-        for _ in range(steps_per_iter):
-            states_c, actions_c, rewards_c, next_states_c, dones_c, rtg, _, _ = buffer.sample(steps_per_iter)
+        for s in range(10):
+            states_c, actions_c, rewards_c, next_states_c, dones_c, rtg, _, idxs, img_states = buffer.sample(steps_per_iter)
+            print(f"step: {s}")
+            
             states_c_t = th.as_tensor(states_c, dtype=th.float32)
             rtg_t    = th.as_tensor(rtg,    dtype=th.float32)
         cr_optimizer.zero_grad()
-        mse = mse_loss(critic(s_t),rtg_t).backward()
+        mse = mse_loss(critic(states_c_t),rtg_t).backward()
         cr_optimizer.step()
         # --- compute GAE advantages ---
         # Run the critic (no gradients) on every stored state.
@@ -225,7 +226,7 @@ def train_ppo(
             # Regress V(s) toward the reward-to-go targets for critic_updates steps.
 
             for _ in range(minibatch_size):
-                mini_states, mini_actions, mini_rewards, mini_states, mini_dones, mini_rtg, _, mini_idx = buffer.sample(minibatch_size)
+                mini_states, mini_actions, mini_rewards, mini_states, mini_dones, mini_rtg, _, mini_idx, img_states = buffer.sample(minibatch_size)
                 mini_states_t = th.as_tensor(mini_states, dtype=th.float32)
                 mini_actions_t = th.as_tensor(mini_actions, dtype=th.float32)
                 mini_rtg_t    = th.as_tensor(mini_rtg,    dtype=th.float32)
@@ -246,10 +247,10 @@ def train_ppo(
 
             mini_advantages = compute_gae(rewards=mini_rewards,values = mini_values, next_values = mini_next_values, dones = mini_dones)  # TODO
             mini_returns = mini_advantages + mini_values
-            print(mini_advantages.shape)
-            print(mini_states_t.shape)
-            print(mini_actions_t.shape)
-            print(mini_returns.shape)
+            # print(mini_advantages.shape)
+            # print(mini_states_t.shape)
+            # print(mini_actions_t.shape)
+            # print(mini_returns.shape)
 
 
             mini_adv_t = th.as_tensor(mini_advantages, dtype=th.float32).squeeze(-1)
@@ -265,7 +266,7 @@ def train_ppo(
             mini_ppo_total_loss.backward()
             optimizer.step()
             prev_loss = mini_ppo_total_loss.item()          
-            optimizer.step()
+            # optimizer.step()
         returns_per_iter.append(np.mean(returns))
         losses_per_iter.append(prev_loss)
         print(f"{k+1}/{iterations} iterations  loss={prev_loss:.4f}")

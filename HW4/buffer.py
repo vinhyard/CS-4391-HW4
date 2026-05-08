@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 import gymnasium as gym
+import cv2 as cv
 
 from Modules import NormalModule
 
@@ -40,8 +41,9 @@ class Buffer:
         sample(batch_size) -> tuple of numpy arrays  — draw a mini-batch
     """
 
-    def __init__(self, sdim, adim, size, sdtype=np.float32, adtype=np.float32, ep_len=200):
+    def __init__(self, sdim, adim, size, sdtype=np.float32, adtype=np.float32, ep_len=200,frame_count=3):
         self.states    = np.zeros((size, sdim), dtype=sdtype)
+        self.img_states    = np.zeros((size,frame_count,63,63), dtype=sdtype)
         self.actions   = np.zeros((size, adim), dtype=adtype)
         self.rewards   = np.zeros((size, 1),    dtype=np.float32)
         self.ret_to_go = np.zeros((size, 1),    dtype=np.float32)
@@ -51,10 +53,12 @@ class Buffer:
         self.max_i = size
         self.ep_len = ep_len
 
-    def add(self, state, action, reward, done):
+    def add(self, state, action, reward, done,img_state=9):
 
 
         self.states[self.i] = state
+        # self.img_states[self.i] = img_state
+        
         self.actions[self.i] = action
         self.rewards[self.i] = reward
         self.dones[self.i] = done
@@ -77,6 +81,7 @@ class Buffer:
             self.dones[next_idxs],
             self.ret_to_go[idxs],
             self.ret_to_go[next_idxs],
+            self.img_states[idxs],
             idxs
         )
 
@@ -129,6 +134,20 @@ def collect_data(size, env, agent, title="collecting"):
     for i in range(size):
         action = act(agent, observation)
         next_observation, reward, term, trunc, e = env.step(action)
+        
+        '''
+        list_observations = []
+        for i in range(3):
+            img = env.render()
+            # processed = preprocess(img)
+        # print(img1.shape)
+            frame = env.step(action)
+            list_observations.append(img)
+        # print(len(list_observations))
+        np_img_observations = np.array(list_observations)
+       '''
+
+
         done = term or trunc
         buffer.add(observation, action, reward, done)
         avg_reward_list.append(reward)
@@ -156,10 +175,47 @@ def rescale_actions(action, amin, amax):
     torque_scaled = action * amax
     return torque_scaled
 
+def preprocess(img):
+    grayscale = cv.cvtColor(img,cv.COLOR_RGB2GRAY)
+    gaussianBlur = cv.GaussianBlur(grayscale,ksize = (5,5),sigmaX = 0)
+    # Computing gradients of x,y
+    sobelx = cv.Sobel(src = gaussianBlur,ddepth=cv.CV_64F,dx=1,dy=0,ksize=3)
+    sobely = cv.Sobel(src = gaussianBlur,ddepth=cv.CV_64F,dx=0,dy=1,ksize=3)
+    magnitude = cv.magnitude(sobelx,sobely)
+
+    # Binary Mask
+    # binarized = cv.threshold(src=magnitude,thresh=30.0,maxval=1.0,type=cv.THRESH_BINARY)
+    # print(magnitude.shape)
+    x_1, x_2, y_1,y_2 = 125,375,125,375
+    cropped = magnitude[x_1:x_2,y_1:y_2]
+    pyramid_down1 = cv.pyrDown(cropped)
+    pyramid_down2 = cv.pyrDown(pyramid_down1)
+    # print(pyramid_down2.shape)
+
+    # cv.imshow("pyramid_down",pyramid_down1)
+    # cv.waitKey(1)
+    processedimage = pyramid_down2
+    return processedimage
+
 
 if __name__ == "__main__":
-    from vpg import train_vpg
-    env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
-    agent = PolicyNet()
-    buffer_replay, mean_reward = collect_data(100, env, agent)
-    print(f"Average Reward Per Step: {mean_reward}")
+    # from vpg import train_vpg
+    # env = gym.make("Pendulum-v1", render_mode="human", g=9.81)
+    # agent = PolicyNet()
+    # buffer_replay, mean_reward = collect_data(100, env, agent)
+    # print(f"Average Reward Per Step: {mean_reward}")
+
+    #testing frame stacking code
+    # WARNING: this code will display ALL stacked frames,
+    # therefore a buffer of 100 size and frame count of 3 
+    # will have 300 images.
+
+    '''
+    states,actions,rewards,states, dones, rtg,_,img_states,_ = buffer_replay.sample(10)
+    
+    for stack in img_states:
+        for img in stack:
+            cv.imshow("frame",img)
+            cv.waitKey(1000)
+        print("next stack")
+    '''
