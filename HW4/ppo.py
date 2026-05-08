@@ -137,7 +137,99 @@ def train_ppo(
         #          collected data and minimise ppo_total_loss(...).
         #       5) log per-iteration episodic return and total loss for the
         #          required learning / loss curve plots.
-        pass
+
+
+
+        #====================================================================
+        # TODO: 1) roll out the current policy for `steps_per_iter` steps
+        #          and store transitions in a Buffer.
+        #====================================================================
+
+        steps_buffer, mean_reward = collect_data(50, env, policy)
+        with th.no_grad():
+            buffer, avg_rwd = collect_data(
+                steps_per_iter, env, policy, title=f"gae {k + 1}/{iterations}"
+            )
+
+        # TODO: fill buffer.ret_to_go using buffer.calc_reward_to_go(gamma).
+        buffer.calc_reward_to_go(gamma=gamma)
+
+
+        #====================================================================
+        #       2) compute V(s) and V(s') with the critic, then GAE advantages
+        #          and target returns (returns = advantages + V(s)).
+        #====================================================================
+
+        # --- train the critic ---
+        # Regress V(s) toward the reward-to-go targets for critic_updates steps.
+        for _ in range(steps_per_iter):
+            states, actions, rewards, states, dones, rtg, _ = buffer.sample(steps_per_iter)
+            states_t = th.as_tensor(states, dtype=th.float32)
+            rtg_t    = th.as_tensor(rtg,    dtype=th.float32)
+            cr_optimizer.zero_grad()
+            mse = mse_loss(critic(states_t) - rtg).backward()
+            cr_optimizer.step()
+
+        # --- compute GAE advantages ---
+        # Run the critic (no gradients) on every stored state.
+        all_states = th.as_tensor(buffer.states[: buffer.max_i], dtype=th.float32)
+        with th.no_grad():
+            values = critic(all_states).numpy()          # V(s_t)
+        next_values = np.zeros_like(values)
+        next_values[:-1] = values[1:]                    # V(s_{t+1}), 0 at episode end
+
+        # compute_gae(...) to get an (N, 1) array of advantages.
+        advantages = compute_gae(rewards=rewards,values = values, next_values = next_values, dones = dones)  # TODO
+        returns = advantages + values
+
+
+        #====================================================================
+        #       3) cache the log-probabilities of the sampled actions under
+        #          the *old* policy (detach from the graph).
+        #====================================================================
+        old_policy = _log_prob(policy=policy,actions=actions,states=all_states)
+
+
+        #====================================================================
+        #       4) for `sgd_epochs` epochs, iterate over minibatches of the
+        #          collected data and minimise ppo_total_loss(...).
+        #====================================================================
+        for x in range(sgd_epochs):
+
+            # --- train the critic ---
+            # Regress V(s) toward the reward-to-go targets for critic_updates steps.
+            for _ in range(minibatch_size):
+                mini_states, mini_actions, mini_rewards, mini_states, mini_dones, mini_rtg, _ = buffer.sample(minibatch_size)
+                mini_states_t = th.as_tensor(mini_states, dtype=th.float32)
+                mini_rtg_t    = th.as_tensor(mini_rtg,    dtype=th.float32)
+                cr_optimizer.zero_grad()
+                mse_mini = mse_loss(critic(mini_states_t) - mini_rtg).backward()
+                cr_optimizer.step()
+
+            # --- compute GAE advantages ---
+            # Run the critic (no gradients) on every stored state.
+            mini_all_states = th.as_tensor(buffer.states[: buffer.max_i], dtype=th.float32)
+            with th.no_grad():
+                mini_values = critic(mini_all_states).numpy()          # V(s_t)
+            mini_next_values = np.zeros_like(mini_values)
+            mini_next_values[:-1] = mini_values[1:]                    # V(s_{t+1}), 0 at episode end
+
+            # compute_gae(...) to get an (N, 1) array of advantages.
+            mini_advantages = compute_gae(rewards=mini_rewards,values = mini_values, next_values = mini_next_values, dones = mini_dones)  # TODO
+            mini_returns = advantages + values
+            optimizer.zero_grad()
+            mini_ppo_total_loss = ppo_total_loss(policy,critic,mini_states,mini_actions,mini_advantages,mini_returns, old_policy).backward()
+            optimizer.step()
+        returns_per_iter.append(np.mean(returns))
+        # losses_per_iter.append(np.mean()) ?
+        print(f"{x}/{iterations} iterations")
+
+
+        #=================
+        # Normalise for training stability (provided).
+        # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        #===============
 
     # TODO: return policy, list_of_returns, list_of_losses
 
