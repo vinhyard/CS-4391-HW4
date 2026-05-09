@@ -22,7 +22,9 @@ def _log_prob(policy, states, actions):
     """Compute sum of log-probabilities under the current policy."""
     mu, sigma = policy(states)
     return Normal(mu, sigma).log_prob(actions).sum(dim=-1, keepdim=True)
-
+def _log_prob_recurrent(policy, states, actions, hidden):
+    mu, sigma, _ = policy(states, hidden)
+    return Normal(mu, sigma).log_prob(actions).sum(dim=1)
 
 def build_actor(state_dim, action_dim, hidden_size):
     """Two-layer feed-forward actor ending in NormalModule (provided).
