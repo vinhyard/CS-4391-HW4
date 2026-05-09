@@ -78,7 +78,7 @@ def ppo_surrogate_loss(
 
 def ppo_total_loss(
     policy,
-    critic,
+    critic,critic2,
     states,
     actions,
     advantages,
@@ -99,7 +99,10 @@ def ppo_total_loss(
 
     surrogate = ppo_surrogate_loss(policy, states, actions, advantages, old_log_probs,
                                    eps_clip=eps_clip, clip=clip)
-    vals = critic(states)
+    vals1 = critic(states)
+    vals2 = critic2(states)
+    vals = (vals1+vals2)/2
+
     val_loss = mse_loss(vals, returns)
     mu, sigma = policy(states)
     s_pi = Normal(mu, sigma).entropy().sum(dim = 1).mean()
@@ -138,8 +141,12 @@ def train_ppo(
 
     policy       = build_actor(state_dim, action_dim, hidden_size)
     critic       = build_critic(state_dim, hidden_size)
+    critic2       = build_critic(state_dim, hidden_size)
+
     optimizer    = th.optim.Adam(policy.parameters(), lr=learning_rate)
     cr_optimizer = th.optim.Adam(critic.parameters(), lr=learning_rate)
+    cr_optimizer2 = th.optim.Adam(critic.parameters(), lr=learning_rate)
+
 
     returns_per_iter = []
     losses_per_iter  = []
@@ -187,14 +194,25 @@ def train_ppo(
             states_c, actions_c, rewards_c, next_states_c, dones_c, rtg, _, _ = buffer.sample(steps_per_iter)
             states_c_t = th.as_tensor(states_c, dtype=th.float32)
             rtg_t    = th.as_tensor(rtg,    dtype=th.float32)
+
         cr_optimizer.zero_grad()
-        mse = mse_loss(critic(s_t),rtg_t).backward()
+        mse = mse_loss(critic(states_c_t),rtg_t).backward()
         cr_optimizer.step()
+
+        cr_optimizer2.zero_grad()
+        mse2 = mse_loss(critic2(states_c_t),rtg_t).backward()
+        cr_optimizer2.step()
+
+        # cr_optimizer2.zero_grad()
+        # mse2 = mse_loss(critic2(s_t))
         # --- compute GAE advantages ---
         # Run the critic (no gradients) on every stored state.
         all_states = th.as_tensor(buffer.states[: buffer.max_i], dtype=th.float32)
         with th.no_grad():
-            values = critic(all_states).numpy()          # V(s_t)
+            value1 = critic(all_states).numpy()
+            value2 = critic2(all_states).numpy() 
+            values = (value1 + value2)/2         # V(s_t)
+                      # V(s_t)
         next_values = np.zeros_like(values)
         next_values[:-1] = values[1:] 
                   # V(s_{t+1}), 0 at episode end
@@ -231,14 +249,20 @@ def train_ppo(
                 mini_rtg_t    = th.as_tensor(mini_rtg,    dtype=th.float32)
                 cr_optimizer.zero_grad()
                 mse_mini = mse_loss(critic(mini_states_t),mini_rtg_t).backward()
-
                 cr_optimizer.step()
+
+                cr_optimizer2.zero_grad()
+                mse_mini2 = mse_loss(critic2(mini_states_t),mini_rtg_t).backward()
+                cr_optimizer2.step()
 
             # --- compute GAE advantages ---
             # Run the critic (no gradients) on every stored state.
             mini_all_states = th.as_tensor(mini_states_t, dtype=th.float32)
             with th.no_grad():
-                mini_values = critic(mini_all_states).detach().numpy()          # V(s_t)
+                mini_values1 = critic(mini_all_states).detach().numpy()  
+                mini_values2 = critic2(mini_all_states).detach().numpy()          # V(s_t)
+                mini_values = (mini_values1+mini_values2)/2
+                        # V(s_t)
             mini_next_values = np.zeros_like(mini_values)
             mini_next_values[:-1] = mini_values[1:]                    # V(s_{t+1}), 0 at episode end
 
@@ -246,10 +270,10 @@ def train_ppo(
 
             mini_advantages = compute_gae(rewards=mini_rewards,values = mini_values, next_values = mini_next_values, dones = mini_dones)  # TODO
             mini_returns = mini_advantages + mini_values
-            print(mini_advantages.shape)
-            print(mini_states_t.shape)
-            print(mini_actions_t.shape)
-            print(mini_returns.shape)
+            # print(mini_advantages.shape)
+            # print(mini_states_t.shape)
+            # print(mini_actions_t.shape)
+            # print(mini_returns.shape)
 
 
             mini_adv_t = th.as_tensor(mini_advantages, dtype=th.float32).squeeze(-1)
@@ -258,14 +282,14 @@ def train_ppo(
 
             optimizer.zero_grad()
             mini_ppo_total_loss = ppo_total_loss(
-                policy, critic,
+                policy, critic,critic2,
                 mini_states_t, mini_actions_t,
                 mini_adv_t, mini_ret_t, mini_old,
                 eps_clip=eps_clip, c1=c1, c2=c2, clip=clip,)
             mini_ppo_total_loss.backward()
             optimizer.step()
             prev_loss = mini_ppo_total_loss.item()          
-            optimizer.step()
+            # optimizer.step()
         returns_per_iter.append(np.mean(returns))
         losses_per_iter.append(prev_loss)
         print(f"{k+1}/{iterations} iterations  loss={prev_loss:.4f}")
@@ -286,6 +310,7 @@ if __name__ == "__main__":
     from video import record_video, generate_strobe
 
     # --- Task 4: clipped vs unclipped ---
+    '''
     _, ret_clip,   loss_clip   = train_ppo(iterations=50, clip=True)
     _, ret_noclip, loss_noclip = train_ppo(iterations=50, clip=False)
     plot_learning_curves(
@@ -296,10 +321,10 @@ if __name__ == "__main__":
         {"clipped": loss_clip, "unclipped": loss_noclip},
         title="Task 4: PPO loss curves",
     )
-
+'''
     # --- Task 5: full PPO ---
-    policy, ret_ppo, loss_ppo = train_ppo(iterations=500)
-    plot_learning_curves({"PPO": ret_ppo}, title="Task 5: Full PPO")
-    plot_loss_curves({"PPO": loss_ppo}, title="Task 5: Total loss")
+    policy, ret_ppo, loss_ppo = train_ppo(iterations=100)
+    plot_learning_curves({"PPO": ret_ppo}, title="Task 5: Full PPO (ensemble)")
+    plot_loss_curves({"PPO": loss_ppo}, title="Task 5: Total loss (ensemble)")
     # record_video(policy, path="videos/task5_ppo.mp4")            # optional
     # generate_strobe(policy, path="videos/task5_ppo_strobe.png")  # optional

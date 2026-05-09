@@ -146,13 +146,13 @@ def train_advantage_vpg(
         # --- train the critic ---
         # Regress V(s) toward the reward-to-go targets for critic_updates steps.
         for _ in range(critic_updates):
-            states, actions, rewards, states, dones, rtg, _, _ = buffer.sample(batch_size)
+            states, actions, rewards, _, dones, rtg, _, _ = buffer.sample(batch_size)
             states_t = torch.as_tensor(states, dtype=torch.float32)
             rtg_t    = torch.as_tensor(rtg,    dtype=torch.float32)
             cr_optimizer.zero_grad()
             # TODO: compute mse_loss between critic(states_t) and rtg_t,
             #       then call .backward() and cr_optimizer.step().
-            mse = mse_loss(critic(states_t) - rtg).backward()
+            mse = mse_loss(critic(states_t),rtg_t).backward()
             cr_optimizer.step()
 
         # --- compute GAE advantages ---
