@@ -275,7 +275,6 @@ def train_ppo(
                 eps_clip=eps_clip, c1=c1, c2=c2, clip=clip,)
             mini_ppo_total_loss.backward()
             prev_loss = mini_ppo_total_loss.item()          
-            optimizer.step()
         returns_per_iter.append(np.mean(returns))
         losses_per_iter.append(prev_loss)
         print(f"{k+1}/{iterations} iterations  loss={prev_loss:.4f}")
